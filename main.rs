@@ -177,6 +177,7 @@ fn yuv_encode(frames: &Vec<Frame>, width: usize, height: usize) -> Vec<Frame>{
     yuv_frames
 }
 
+// TODO: is there a better way to handle overflow?
 // compute difference and handle overflow
 fn pixel_diff(val_1: u8, val_2: u8) -> u8 {
     if val_2 > val_1 {
@@ -186,11 +187,11 @@ fn pixel_diff(val_1: u8, val_2: u8) -> u8 {
     val_1 - val_2
 }
 
-// compute summation nd handel overflow
+// compute summation and handel overflow
 fn pixel_sum(val_1: u8, val_2: u8) -> u8 {
     let sum = (val_1 as u16) + (val_2 as u16);
     if sum > 255 {
-        return (sum - 255) as u8
+        return (sum - 256) as u8
     }
 
     sum as u8
