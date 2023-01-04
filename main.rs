@@ -63,8 +63,6 @@ fn main() -> io::Result<()> {
 
 
     // rle encoder
-    // TODO: some values are incorrect and decoded value has weird noise
-    //      suspect something with pixel_diff?
     let rle_frames = rle_encode(&yuv_frames);
     let rle_size = video_size(&rle_frames);
     println!("(encoded rle) size: {} MB", rle_size);
