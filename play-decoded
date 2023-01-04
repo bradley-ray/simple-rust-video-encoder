@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+
+FILE="data/decoded.rle"
+WIDTH="384"
+HEIGHT="216"
+
+ffplay -f rawvideo -pixel_format yuv420p -video_size ${WIDTH}x${HEIGHT} -framerate 25 ${FILE}
