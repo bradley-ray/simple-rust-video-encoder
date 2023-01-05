@@ -5,7 +5,7 @@ use std::io::{Read, BufReader};
 use std::io::{Write, BufWriter};
 
 
-const MB: f32 = 1_000_000.;
+const MB: f32 = 1e6;
 
 type Frame = Vec<u8>;
 
@@ -47,8 +47,6 @@ impl ColorRGB {
 }
 
 
-// TODO: currently just lazily using ?, so need to
-//      properly handle the Result<> later 
 fn main() -> io::Result<()> {
     let args = Args::parse();
     let in_path = args.input_file;
@@ -65,13 +63,17 @@ fn main() -> io::Result<()> {
         
         // Read video file into memory
         println!("reading in file...");
-        let frames = read_video(&in_path, frame_size)?;
-        println!("finished reading in file");
-
+        let frames = match read_video(&in_path, frame_size) {
+            Ok(vec) => {
+                println!("finished reading in file");
+                vec
+            },
+            Err(error) => panic!("Error reading file '{in_path}': {error}"),
+        };
         let raw_size = video_size(&frames);
         println!("original size: {} MB\n", raw_size);
 
-        // convert to yuv and downsample
+        // Convert from RGB to YUV and downsample
         println!("started yuv encoding...");
         let yuv_frames = yuv_encode(&frames, width, height);
         println!("finished yuv encoding");
@@ -80,10 +82,13 @@ fn main() -> io::Result<()> {
         println!("{}% of original size", 100.0 * yuv_size / raw_size);
         // Write yuv video to file
         println!("writing out file...");
-        write_file(&yuv_out_path, &yuv_frames)?;
-        println!("finished writing out file\n");
+        match write_file(&yuv_out_path, &yuv_frames) {
+            Ok(_) => println!("finished writing out file\n"),
+            Err(error) => panic!("Error writing file '{yuv_out_path}': {error}"),
+        };
+        
 
-        // rle encoder
+        // Encode file using RLE
         println!("started rle encoding...");
         let rle_frames_enc = rle_encode(&yuv_frames);
         println!("finished rle encoding");
@@ -92,20 +97,32 @@ fn main() -> io::Result<()> {
         println!("{}% of original size", 100.0 * rle_size / raw_size);
         // write encoded video to file
         println!("writing out file...");
-        write_file(&rle_out_path, &rle_frames_enc)?;
-        println!("finished writing out file\n");
+        match write_file(&rle_out_path, &rle_frames_enc) {
+            Ok(_) => println!("finished writing out file\n"),
+            Err(error) => panic!("Error writing file '{rle_out_path}': {error}"),
+        };
+        
     } else {
-        // rle decoder
+        // Read in encoded file
         let rle_out_path = [&out_dir, "/decoded.rle"].concat();
         println!("reading in file...");
-        let rle_frames = read_encoded(&in_path, frame_size/2)?;
-        println!("finished reading in file");
+        let rle_frames = match read_encoded(&in_path, frame_size/2) {
+            Ok(vec) => {
+                println!("finished reading in file");
+                vec
+            },
+            Err(error) => panic!("Error reading file '{in_path}': {error}")
+        };
+
+        // Decode file
         println!("started file decoding...");
         let decoded_frames = rle_decode(&rle_frames, frame_size/2);
         println!("finished file decoding");
         println!("writing out file...");
-        write_file(&rle_out_path, &decoded_frames)?;
-        println!("finished writing out file");
+        match write_file(&rle_out_path, &decoded_frames) {
+            Ok(_) => println!("finished writing out file"),
+            Err(error) => panic!("Error writing file '{rle_out_path}': {error}")
+        };
     }
 
     Ok(())

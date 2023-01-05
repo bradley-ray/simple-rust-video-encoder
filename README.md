@@ -12,7 +12,7 @@ For educational purposeses, to learn Rust and a little bit about video encoding.
   - [ ] issues with speed compared to kevmo314's go implementation
   - [ ] can improve readability a lot along with scalability for later codec implmentations if wanted
   - [x] needs better cmd line argument interface
-  - [ ] need to improve error handling
+  - [x] need to improve error handling
 
 ## Maybe Later TODO
 * implement DEFLATE
