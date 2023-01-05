@@ -1,4 +1,3 @@
-encoder
-decoder
-main
+simple-video-encoder/target/
+simple-video-encoder/Cargo.lock
 data/

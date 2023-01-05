@@ -1,13 +1,37 @@
-use std::env;
+use clap::Parser;
 use std::fs;
-
 use std::io;
 use std::io::{Read, BufReader};
 use std::io::{Write, BufWriter};
 
+
 const MB: f32 = 1_000_000.;
 
 type Frame = Vec<u8>;
+
+#[derive(Parser)]
+struct Args {
+    // Video file to encode
+    #[arg(short, default_value_t = String::from("video.rgb24"))]
+    input_file: String,
+
+    // Output directory
+    #[arg(short, default_value_t = String::from("data/"))]
+    output_dir: String,
+
+    // Video width
+    #[arg(long, default_value_t = 384)]
+    width: usize,
+
+    // Video height
+    #[arg(long, default_value_t = 216)]
+    height: usize,
+
+    // Decode mode
+    #[arg[short, default_value_t = false]]
+    decode: bool,
+}
+
 
 struct ColorRGB{r: f32, g: f32, b: f32}
 struct ColorYUV{y: f32, u: f32, v: f32}
@@ -23,58 +47,66 @@ impl ColorRGB {
 }
 
 
-// TODO: once have fully working encoder & decoder, go through and refactor
-// TODO: currently just lazily using unwrap, so need to
-//      properly handle the Result<> later
+// TODO: currently just lazily using ?, so need to
+//      properly handle the Result<> later 
 fn main() -> io::Result<()> {
-    // TODO: make/use better tooling for cmd line args
-    let args: Vec<String> = env::args().collect();
-    let in_path = args.get(1).unwrap();
-    let out_path_1 = args.get(2).unwrap();
-    let out_path_2 = args.get(3).unwrap();
-    let width: usize = args.get(4).unwrap().parse().unwrap();
-    let height: usize = args.get(5).unwrap().parse().unwrap();
+    let args = Args::parse();
+    let in_path = args.input_file;
+    let out_dir = args.output_dir;
+    let width = args.width;
+    let height = args.height;
+    let decode = args.decode;
 
-    println!("input path: {}", in_path);
-    println!("output path 1: {}", out_path_1);
-    println!("output path 2: {}", out_path_2);
-    println!("width: {}", width);
-    println!("height: {}", height);
+    let frame_size = width*height*3;
 
-    // Read video file into memory
-    let buffer_size = width*height*3;
-    let frames = read_video(in_path, buffer_size)?;
-    println!("number of frames: {}", frames.len());
-    println!();
+    if !decode {
+        let yuv_out_path = [&out_dir, "/encoded.yuv"].concat();
+        let rle_out_path = [&out_dir, "/encoded.rle"].concat();
+        
+        // Read video file into memory
+        println!("reading in file...");
+        let frames = read_video(&in_path, frame_size)?;
+        println!("finished reading in file");
 
-    let raw_size = video_size(&frames);
-    println!("(original rgb) size: {} MB\n", raw_size);
+        let raw_size = video_size(&frames);
+        println!("original size: {} MB\n", raw_size);
 
-    // convert to yuv and downsample
-    let yuv_frames = yuv_encode(&frames, width, height);
-    let yuv_size = video_size(&yuv_frames);
+        // convert to yuv and downsample
+        println!("started yuv encoding...");
+        let yuv_frames = yuv_encode(&frames, width, height);
+        println!("finished yuv encoding");
+        let yuv_size = video_size(&yuv_frames);
+        println!("new size: {} MB", yuv_size);
+        println!("{}% of original size", 100.0 * yuv_size / raw_size);
+        // Write yuv video to file
+        println!("writing out file...");
+        write_file(&yuv_out_path, &yuv_frames)?;
+        println!("finished writing out file\n");
 
-    println!("{}", yuv_frames[0].len());
-
-    println!("(encoded yuv) size: {} MB", yuv_size);
-    println!("(encoded yuv) yuv/rgb: {} %\n", 100.0 * yuv_size / raw_size);
-    // Write yuv video to file
-    write_video(out_path_1, &yuv_frames)?;
-
-
-    // rle encoder
-    let rle_frames = rle_encode(&yuv_frames);
-    let rle_size = video_size(&rle_frames);
-    println!("(encoded rle) size: {} MB", rle_size);
-    println!("(encoded rle) rle/rgb: {} %\n", 100.0 * rle_size / raw_size);
-
-    // rle decoder
-    let rle_decoded = rle_decode(&rle_frames, yuv_frames[0].len());
-    let rle_decode_size = video_size(&rle_decoded);
-    println!("(decoded rle) size: {} MB", rle_decode_size);
-
-    // Write decoded video to file
-    write_video(out_path_2, &rle_decoded)?;
+        // rle encoder
+        println!("started rle encoding...");
+        let rle_frames_enc = rle_encode(&yuv_frames);
+        println!("finished rle encoding");
+        let rle_size = video_size(&rle_frames_enc);
+        println!("new size: {} MB", rle_size);
+        println!("{}% of original size", 100.0 * rle_size / raw_size);
+        // write encoded video to file
+        println!("writing out file...");
+        write_file(&rle_out_path, &rle_frames_enc)?;
+        println!("finished writing out file\n");
+    } else {
+        // rle decoder
+        let rle_out_path = [&out_dir, "/decoded.rle"].concat();
+        println!("reading in file...");
+        let rle_frames = read_encoded(&in_path, frame_size/2)?;
+        println!("finished reading in file");
+        println!("started file decoding...");
+        let decoded_frames = rle_decode(&rle_frames, frame_size/2);
+        println!("finished file decoding");
+        println!("writing out file...");
+        write_file(&rle_out_path, &decoded_frames)?;
+        println!("finished writing out file");
+    }
 
     Ok(())
 }
@@ -90,25 +122,61 @@ fn video_size(frames: &Vec<Frame>) -> f32 {
 }
 
 // read video into memory from input file
-fn read_video(path: &str, buffer_size: usize) ->  io::Result<Vec<Frame>> {
+fn read_video(path: &str, size: usize) ->  io::Result<Vec<Frame>> {
     let mut frames = Vec::new();
     let file = fs::File::open(path)?;
     let mut reader = BufReader::new(file);
     loop {
-        let mut frame_buffer = vec![0; buffer_size];
+        let mut frame_buffer = vec![0; size];
         let n = reader.read(&mut frame_buffer)?;
-        if n < frames.len() {
+        if n < size {
             break;
         }
-
         frames.push(frame_buffer);
     }
 
     Ok(frames)
 }
 
-// write vidoe to output file
-fn write_video(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
+// TODO: this can probably be made simpler
+// read in encoded input video file
+fn read_encoded(path: &str, size: usize) -> io::Result<Vec<Frame>> {
+    let mut frames = Vec::new();
+    let file = fs::File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut frame = Vec::with_capacity(size);
+
+    let mut is_first = true;
+    let mut total = 0;
+    let mut i = 0;
+    for result in reader.bytes() {
+        let byte = result?;
+
+        // first frame is stored unencoded
+        if is_first {
+            total += 1;
+        } else if i % 2 == 0 {
+            total += byte as usize;
+        } 
+        frame.push(byte);
+        
+        if total == size && (i+1) % 2 == 0 {
+            assert!(frame.len() <= size);
+            frames.push(frame.to_vec());
+            frame.clear();
+            is_first = false;
+            total = 0;
+        }
+
+        i+=1;
+    }
+    assert_eq!(frames.len(), 217);
+
+    Ok(frames)
+}
+
+// write to output file
+fn write_file(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
     let file = fs::File::options()
                         .write(true)
                         .create(true)
@@ -116,6 +184,7 @@ fn write_video(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
     let mut writer = BufWriter::new(file);
     writer.write_all(&frames.concat())
 }
+
 
 // convert single frame from rgb to yuv
 fn frame_to_yuv(frame: &Frame, y_buf: &mut Frame, u_buf: &mut Vec<f32>, v_buf: &mut Vec<f32>, size: usize) {
@@ -175,26 +244,6 @@ fn yuv_encode(frames: &Vec<Frame>, width: usize, height: usize) -> Vec<Frame>{
     yuv_frames
 }
 
-// TODO: is there a better way to handle overflow?
-// compute difference and handle overflow
-fn pixel_diff(val_1: u8, val_2: u8) -> u8 {
-    if val_2 > val_1 {
-        return (256 - (val_2 as u16) + (val_1 as u16)) as u8
-    }
-
-    val_1 - val_2
-}
-
-// compute summation and handel overflow
-fn pixel_sum(val_1: u8, val_2: u8) -> u8 {
-    let sum = (val_1 as u16) + (val_2 as u16);
-    if sum > 255 {
-        return (sum - 256) as u8
-    }
-
-    sum as u8
-}
-
 fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
     let mut rle_frames = Vec::with_capacity(frames.len());
     for i in 0..frames.len() {
@@ -206,7 +255,7 @@ fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
         // get difference between each frame
         let mut delta = Vec::with_capacity(frames[i].len());
         for j in 0..delta.capacity() {
-            delta.push(pixel_diff(frames[i][j], frames[i-1][j]));
+            delta.push(frames[i][j].wrapping_sub(frames[i-1][j]));
         }
 
         // compute run length encoding on frame differences
@@ -222,7 +271,6 @@ fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
 
             j += count;
         }
-
 
         rle_frames.push(rle);
     }
@@ -249,7 +297,7 @@ fn rle_decode(frames: &Vec<Frame>, size: usize) -> Vec<Frame> {
 
         let mut decoded_frame = Vec::with_capacity(size);
         for j in 0..delta.len() {
-            decoded_frame.push(pixel_sum(rle_frames[i-1][j], delta[j]));
+            decoded_frame.push(rle_frames[i-1][j].wrapping_add(delta[j]));
         }
             
         rle_frames.push(decoded_frame);
