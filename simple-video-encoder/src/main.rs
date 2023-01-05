@@ -1,13 +1,39 @@
-use std::env;
-use std::fs;
+use clap::Parser;
 
+use std::fs;
 use std::io;
 use std::io::{Read, BufReader};
 use std::io::{Write, BufWriter};
 
+
 const MB: f32 = 1_000_000.;
 
 type Frame = Vec<u8>;
+
+#[derive(Parser)]
+struct Args {
+    // Video file to encode
+    #[arg(short, default_value_t = String::from("video.rgb24"))]
+    input_file: String,
+
+
+    // Output directory
+    #[arg(short, default_value_t = String::from("data/"))]
+    output_dir: String,
+
+    // Video width
+    #[arg(long, default_value_t = 384)]
+    width: usize,
+
+    // Video height
+    #[arg(long, default_value_t = 216)]
+    height: usize,
+
+    // Decode mode
+    #[arg[short, default_value_t = false]]
+    decode: bool,
+}
+
 
 struct ColorRGB{r: f32, g: f32, b: f32}
 struct ColorYUV{y: f32, u: f32, v: f32}
@@ -28,22 +54,25 @@ impl ColorRGB {
 //      properly handle the Result<> later
 fn main() -> io::Result<()> {
     // TODO: make/use better tooling for cmd line args
-    let args: Vec<String> = env::args().collect();
-    let in_path = args.get(1).unwrap();
-    let out_path_1 = args.get(2).unwrap();
-    let out_path_2 = args.get(3).unwrap();
-    let width: usize = args.get(4).unwrap().parse().unwrap();
-    let height: usize = args.get(5).unwrap().parse().unwrap();
+    let args = Args::parse();
+    // let args: Vec<String> = env::args().collect();
+    // let in_path = args.get(1).unwrap();
+    // let out_path_1 = args.get(2).unwrap();
+    // let out_path_2 = args.get(3).unwrap();
+    // let width: usize = args.get(4).unwrap().parse().unwrap();
+    // let height: usize = args.get(5).unwrap().parse().unwrap();
+    let in_path = args.input_file;
+    let out_dir = args.output_dir;
+    let width = args.width;
+    let height = args.height;
+    let decode = args.decode;
 
-    println!("input path: {}", in_path);
-    println!("output path 1: {}", out_path_1);
-    println!("output path 2: {}", out_path_2);
-    println!("width: {}", width);
-    println!("height: {}", height);
-
+    let out_path_1 = [&out_dir, "/encoding.yuv"].concat();
+    let out_path_2 = [&out_dir, "/decoding.rle"].concat();
+    
     // Read video file into memory
     let buffer_size = width*height*3;
-    let frames = read_video(in_path, buffer_size)?;
+    let frames = read_video(&in_path, buffer_size)?;
     println!("number of frames: {}", frames.len());
     println!();
 
@@ -59,7 +88,7 @@ fn main() -> io::Result<()> {
     println!("(encoded yuv) size: {} MB", yuv_size);
     println!("(encoded yuv) yuv/rgb: {} %\n", 100.0 * yuv_size / raw_size);
     // Write yuv video to file
-    write_video(out_path_1, &yuv_frames)?;
+    write_video(&out_path_1, &yuv_frames)?;
 
 
     // rle encoder
@@ -74,7 +103,7 @@ fn main() -> io::Result<()> {
     println!("(decoded rle) size: {} MB", rle_decode_size);
 
     // Write decoded video to file
-    write_video(out_path_2, &rle_decoded)?;
+    write_video(&out_path_2, &rle_decoded)?;
 
     Ok(())
 }
