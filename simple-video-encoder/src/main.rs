@@ -49,61 +49,67 @@ impl ColorRGB {
 }
 
 
-// TODO: once have fully working encoder & decoder, go through and refactor
 // TODO: currently just lazily using unwrap, so need to
 //      properly handle the Result<> later
 fn main() -> io::Result<()> {
-    // TODO: make/use better tooling for cmd line args
     let args = Args::parse();
-    // let args: Vec<String> = env::args().collect();
-    // let in_path = args.get(1).unwrap();
-    // let out_path_1 = args.get(2).unwrap();
-    // let out_path_2 = args.get(3).unwrap();
-    // let width: usize = args.get(4).unwrap().parse().unwrap();
-    // let height: usize = args.get(5).unwrap().parse().unwrap();
     let in_path = args.input_file;
     let out_dir = args.output_dir;
     let width = args.width;
     let height = args.height;
     let decode = args.decode;
 
-    let out_path_1 = [&out_dir, "/encoding.yuv"].concat();
-    let out_path_2 = [&out_dir, "/decoding.rle"].concat();
-    
-    // Read video file into memory
-    let buffer_size = width*height*3;
-    let frames = read_video(&in_path, buffer_size)?;
-    println!("number of frames: {}", frames.len());
-    println!();
+    if !decode {
+        let yuv_out_path = [&out_dir, "/encoded.yuv"].concat();
+        let rle_out_path = [&out_dir, "/encoded.rle"].concat();
+        
+        // Read video file into memory
+        let frame_size = width*height*3;
+        println!("reading in file...");
+        let frames = read_video(&in_path, frame_size)?;
+        println!("finished reading in file");
 
-    let raw_size = video_size(&frames);
-    println!("(original rgb) size: {} MB\n", raw_size);
+        let raw_size = video_size(&frames);
+        println!("original size: {} MB\n", raw_size);
 
-    // convert to yuv and downsample
-    let yuv_frames = yuv_encode(&frames, width, height);
-    let yuv_size = video_size(&yuv_frames);
+        // convert to yuv and downsample
+        println!("started yuv encoding...");
+        let yuv_frames = yuv_encode(&frames, width, height);
+        println!("finished yuv encoding");
+        let yuv_size = video_size(&yuv_frames);
+        println!("{}% of original size", 100.0 * yuv_size / raw_size);
+        // Write yuv video to file
+        println!("writing out file...");
+        write_file(&yuv_out_path, &yuv_frames)?;
+        println!("finished writing out file\n");
 
-    println!("{}", yuv_frames[0].len());
 
-    println!("(encoded yuv) size: {} MB", yuv_size);
-    println!("(encoded yuv) yuv/rgb: {} %\n", 100.0 * yuv_size / raw_size);
-    // Write yuv video to file
-    write_video(&out_path_1, &yuv_frames)?;
+        // rle encoder
+        println!("started rle encoding...");
+        let rle_frames = rle_encode(&yuv_frames);
+        println!("finished rle encoding");
+        let rle_size = video_size(&rle_frames);
+        println!("{}% of original size", 100.0 * rle_size / raw_size);
+        // write encoded video to file
+        println!("writing out file...");
+        write_file(&rle_out_path, &rle_frames)?;
+        println!("finished writing out file\n");
+    }
 
+    // TODO: implemenet the 'read_encoded' function and figure out what 'size' should be
+    else {
+        let rle_out_path = [&out_dir, "/decoded.rle"].concat();
+        println!("reading in file...");
+        let rle_frames = read_encoded(&rle_out_path)?;
+        println!("finished reading in file");
+        println!("started file decoding...");
+        let decoded_frames = rle_decode(&rle_frames, 0);
+        println!("finished file decoding");
+        println!("writing out file...");
+        write_file(&rle_out_path, &decoded_frames)?;
+        println!("finished writing out file");
 
-    // rle encoder
-    let rle_frames = rle_encode(&yuv_frames);
-    let rle_size = video_size(&rle_frames);
-    println!("(encoded rle) size: {} MB", rle_size);
-    println!("(encoded rle) rle/rgb: {} %\n", 100.0 * rle_size / raw_size);
-
-    // rle decoder
-    let rle_decoded = rle_decode(&rle_frames, yuv_frames[0].len());
-    let rle_decode_size = video_size(&rle_decoded);
-    println!("(decoded rle) size: {} MB", rle_decode_size);
-
-    // Write decoded video to file
-    write_video(&out_path_2, &rle_decoded)?;
+    }
 
     Ok(())
 }
@@ -136,8 +142,13 @@ fn read_video(path: &str, buffer_size: usize) ->  io::Result<Vec<Frame>> {
     Ok(frames)
 }
 
-// write vidoe to output file
-fn write_video(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
+// read in encoded input video file
+fn read_encoded(path: &str) -> io::Result<Vec<Frame>> {
+    Ok(Vec::new())
+}
+
+// write to output file
+fn write_file(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
     let file = fs::File::options()
                         .write(true)
                         .create(true)
@@ -145,6 +156,7 @@ fn write_video(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
     let mut writer = BufWriter::new(file);
     writer.write_all(&frames.concat())
 }
+
 
 // convert single frame from rgb to yuv
 fn frame_to_yuv(frame: &Frame, y_buf: &mut Frame, u_buf: &mut Vec<f32>, v_buf: &mut Vec<f32>, size: usize) {
