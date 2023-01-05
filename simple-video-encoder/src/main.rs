@@ -170,7 +170,6 @@ fn read_encoded(path: &str, size: usize) -> io::Result<Vec<Frame>> {
 
         i+=1;
     }
-    assert_eq!(frames.len(), 217);
 
     Ok(frames)
 }
