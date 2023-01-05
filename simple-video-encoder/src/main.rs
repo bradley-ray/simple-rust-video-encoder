@@ -94,6 +94,9 @@ fn main() -> io::Result<()> {
         println!("writing out file...");
         write_file(&rle_out_path, &rle_frames)?;
         println!("finished writing out file\n");
+
+        let decoded_frames = rle_decode(&rle_frames, yuv_frames[0].len());
+        write_file(&[&out_dir, "/decoded.rle"].concat(), &decoded_frames)?;
     }
 
     // TODO: implemenet the 'read_encoded' function and figure out what 'size' should be
@@ -216,26 +219,6 @@ fn yuv_encode(frames: &Vec<Frame>, width: usize, height: usize) -> Vec<Frame>{
     yuv_frames
 }
 
-// TODO: is there a better way to handle overflow?
-// compute difference and handle overflow
-fn pixel_diff(val_1: u8, val_2: u8) -> u8 {
-    if val_2 > val_1 {
-        return (256 - (val_2 as u16) + (val_1 as u16)) as u8
-    }
-
-    val_1 - val_2
-}
-
-// compute summation and handel overflow
-fn pixel_sum(val_1: u8, val_2: u8) -> u8 {
-    let sum = (val_1 as u16) + (val_2 as u16);
-    if sum > 255 {
-        return (sum - 256) as u8
-    }
-
-    sum as u8
-}
-
 fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
     let mut rle_frames = Vec::with_capacity(frames.len());
     for i in 0..frames.len() {
@@ -247,7 +230,7 @@ fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
         // get difference between each frame
         let mut delta = Vec::with_capacity(frames[i].len());
         for j in 0..delta.capacity() {
-            delta.push(pixel_diff(frames[i][j], frames[i-1][j]));
+            delta.push(frames[i][j].wrapping_sub(frames[i-1][j]));
         }
 
         // compute run length encoding on frame differences
@@ -290,7 +273,7 @@ fn rle_decode(frames: &Vec<Frame>, size: usize) -> Vec<Frame> {
 
         let mut decoded_frame = Vec::with_capacity(size);
         for j in 0..delta.len() {
-            decoded_frame.push(pixel_sum(rle_frames[i-1][j], delta[j]));
+            decoded_frame.push(rle_frames[i-1][j].wrapping_add(delta[j]));
         }
             
         rle_frames.push(decoded_frame);
