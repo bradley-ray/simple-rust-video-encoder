@@ -162,11 +162,9 @@ fn read_encoded(path: &str, size: usize) -> io::Result<Vec<Frame>> {
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
     let mut frame = Vec::with_capacity(size);
-
     let mut is_first = true;
     let mut total = 0;
-    let mut i = 0;
-    for result in reader.bytes() {
+    for (i, result) in reader.bytes().enumerate() {
         let byte = result?;
 
         // first frame is stored unencoded
@@ -184,15 +182,13 @@ fn read_encoded(path: &str, size: usize) -> io::Result<Vec<Frame>> {
             is_first = false;
             total = 0;
         }
-
-        i+=1;
     }
 
     Ok(frames)
 }
 
 // write to output file
-fn write_file(path: &str, frames: &Vec<Frame>) -> io::Result<()> {
+fn write_file(path: &str, frames: &[Frame]) -> io::Result<()> {
     let file = fs::File::options()
                         .write(true)
                         .create(true)
@@ -218,7 +214,7 @@ fn frame_to_yuv(frame: &Frame, y_buf: &mut Frame, u_buf: &mut Vec<f32>, v_buf: &
 }
 
 // downsample u & v
-fn uv_downsample(u_buf: &Vec<f32>, v_buf: &Vec<f32>, 
+fn uv_downsample(u_buf: &[f32], v_buf: &[f32], 
                     u_down_buf: &mut Frame, v_down_buf: &mut Frame, 
                     width: usize, height: usize) {
     for x in (0..height).step_by(2) {
@@ -312,8 +308,8 @@ fn rle_decode(frames: &Vec<Frame>, size: usize) -> Vec<Frame> {
         assert_eq!(size, delta.len());
 
         let mut decoded_frame = Vec::with_capacity(size);
-        for j in 0..delta.len() {
-            decoded_frame.push(rle_frames[i-1][j].wrapping_add(delta[j]));
+        for (j, diff) in delta.iter().enumerate() {
+            decoded_frame.push(rle_frames[i-1][j].wrapping_add(*diff));
         }
             
         rle_frames.push(decoded_frame);
