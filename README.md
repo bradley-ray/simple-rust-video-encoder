@@ -10,10 +10,7 @@ For educational purposeses, to learn Rust and a little bit about video encoding.
   - [x] fix weird noise in encoder/decoder
 - [ ] refactor
   - [x] issues with speed compared to kevmo314's go implementation
-    * i'm going to count this as done (minus some small imporvements I'll make with regards to memory allocation)
-    * building for release gives me speed a lot more than the go implementation
-    * from quick reading, build for release better optimizers iterations which is where
-      I was having all my issues
+  - [ ] attempt to reduce all type Vec<Vec<u8>> to just type Vec<u8>
   - [ ] can improve readability a lot along with scalability for later codec implmentations if wanted
   - [x] needs better cmd line argument interface
   - [x] need to improve error handling

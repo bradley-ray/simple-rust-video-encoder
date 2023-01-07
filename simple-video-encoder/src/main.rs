@@ -1,8 +1,6 @@
 use clap::Parser;
 use std::fs;
-use std::io;
-use std::io::{Read, BufReader};
-use std::io::{Write, BufWriter};
+use std::io::{self, Read, Write};
 
 
 const MB: f32 = 1e6;
@@ -32,21 +30,6 @@ struct Args {
     decode: bool,
 }
 
-
-struct ColorRGB{r: f32, g: f32, b: f32}
-struct ColorYUV{y: f32, u: f32, v: f32}
-
-impl ColorRGB {
-    fn to_yuv(&self) -> ColorYUV {
-        let y =  0.299*self.r + 0.587*self.g + 0.114*self.b;
-        let u = -0.169*self.r - 0.331*self.g + 0.449*self.b  + 128.0;
-        let v =  0.499*self.r - 0.418*self.g - 0.0813*self.b + 128.0;
-        
-        ColorYUV{y, u, v}
-    }
-}
-
-
 fn main() -> io::Result<()> {
     let args = Args::parse();
     let in_path = args.input_file;
@@ -75,7 +58,7 @@ fn main() -> io::Result<()> {
 
         // Convert from RGB to YUV and downsample
         println!("started yuv encoding...");
-        let yuv_frames = yuv_encode(&frames, width, height);
+        let yuv_frames = rgb_to_yuv(&frames, width, height);
         println!("finished yuv encoding");
         let yuv_size = video_size(&yuv_frames);
         println!("new size: {} MB", yuv_size);
@@ -142,33 +125,31 @@ fn video_size(frames: &Vec<Frame>) -> f32 {
 fn read_video(path: &str, size: usize) ->  io::Result<Vec<Frame>> {
     let mut frames = Vec::new();
     let file = fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
+    let mut reader = io::BufReader::new(file);
     loop {
-        let mut frame_buffer = vec![0; size];
-        let n = reader.read(&mut frame_buffer)?;
+        let mut frame= vec![0; size];
+        let n = reader.read(&mut frame)?;
         if n < size {
             break;
         }
-        frames.push(frame_buffer);
+        frames.push(frame);
     }
 
     Ok(frames)
 }
 
-// TODO: this can probably be made simpler
 // read in encoded input video file
 fn read_encoded(path: &str, size: usize) -> io::Result<Vec<Frame>> {
     let mut frames = Vec::new();
     let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
+    let reader = io::BufReader::new(file);
     let mut frame = Vec::with_capacity(size);
-    let mut is_first = true;
     let mut total = 0;
     for (i, result) in reader.bytes().enumerate() {
         let byte = result?;
 
         // first frame is stored unencoded
-        if is_first {
+        if i < size {
             total += 1;
         } else if i % 2 == 0 {
             total += byte as usize;
@@ -176,10 +157,8 @@ fn read_encoded(path: &str, size: usize) -> io::Result<Vec<Frame>> {
         frame.push(byte);
         
         if total == size && (i+1) % 2 == 0 {
-            assert!(frame.len() <= size);
             frames.push(frame.to_vec());
             frame.clear();
-            is_first = false;
             total = 0;
         }
     }
@@ -193,69 +172,58 @@ fn write_file(path: &str, frames: &[Frame]) -> io::Result<()> {
                         .write(true)
                         .create(true)
                         .open(path)?;
-    let mut writer = BufWriter::new(file);
+    let mut writer = io::BufWriter::new(file);
     writer.write_all(&frames.concat())
 }
 
+// convert rgb to yuv
+fn rgb_to_yuv(frames: &Vec<Frame>, width: usize, height: usize) -> Vec<Frame>{
+    let size = width*height;
 
-// convert single frame from rgb to yuv
-fn frame_to_yuv(frame: &Frame, y_buf: &mut Frame, u_buf: &mut Vec<f32>, v_buf: &mut Vec<f32>, size: usize) {
-    for n in 0..size {
-        let r = frame[3*n] as f32;
-        let g = frame[3*n+1] as f32;
-        let b = frame[3*n+2] as f32;
-
-        let ColorYUV{y, u, v} = ColorRGB{r, g, b}.to_yuv();
-
-        y_buf.push(y as u8);
-        u_buf.push(u);
-        v_buf.push(v);
-    }
-}
-
-// downsample u & v
-fn uv_downsample(u_buf: &[f32], v_buf: &[f32], 
-                    u_down_buf: &mut Frame, v_down_buf: &mut Frame, 
-                    width: usize, height: usize) {
-    for x in (0..height).step_by(2) {
-        for y in (0..width).step_by(2) {
-            let u = (u_buf[x*width+y] + u_buf[x*width+y+1] + u_buf[(x+1)*width+y] + u_buf[(x+1)*width+y+1]) / 4.0;
-            let v = (v_buf[x*width+y] + v_buf[x*width+y+1] + v_buf[(x+1)*width+y] + v_buf[(x+1)*width+y+1]) / 4.0;
-
-            u_down_buf[x/2*width/2+y/2] = u as u8;
-            v_down_buf[x/2*width/2+y/2] = v as u8;
-        }
-    }
-}
-
-fn yuv_encode(frames: &Vec<Frame>, width: usize, height: usize) -> Vec<Frame>{
-    let mut yuv_frames = Vec::new();
+    let mut yuv_frames = Vec::with_capacity(frames.len());
+    let mut y  = Vec::with_capacity(size);
+    let mut u = Vec::with_capacity(size);
+    let mut v = Vec::with_capacity(size);
+    let mut u_avg= Vec::with_capacity(size/4);
+    let mut v_avg = Vec::with_capacity(size/4);
 
     for frame in frames {
-        let mut y_buf: Frame    = Vec::with_capacity(width*height);
-        let mut u_buf: Vec<f32> = Vec::with_capacity(width*height);
-        let mut v_buf: Vec<f32> = Vec::with_capacity(width*height);
-
         // calculate y, u, v values
-        let size = y_buf.capacity();
-        frame_to_yuv(frame, &mut y_buf, &mut u_buf, &mut v_buf, size);
+        for chunk in frame.chunks(3) {
+            let r = chunk[0] as f32;
+            let g = chunk[1] as f32;
+            let b = chunk[2] as f32;
+
+            y.push((0.299*r + 0.587*g + 0.114*b) as u8);
+            u.push(-0.169*r - 0.331*g + 0.449*b  + 128.0);
+            v.push(0.499*r - 0.418*g - 0.0813*b + 128.0);
+        }
 
         // average pixels together
-        let mut u_downsampled = vec![0; width*height/4];
-        let mut v_downsampled = vec![0; width*height/4];
-        uv_downsample(&u_buf, &v_buf, &mut u_downsampled, &mut v_downsampled, width, height);
+        let w = width;
+        for i in (0..height).step_by(2) {
+            for j in (0..width).step_by(2) {
+                let u_ = (u[i*w+j] + u[i*w+j+1] + u[(i+1)*w+j] + u[(i+1)*w+j+1]) / 4.0;
+                let v_ = (v[i*w+j] + v[i*w+j+1] + v[(i+1)*w+j] + v[(i+1)*w+j+1]) / 4.0;
 
-        let mut yuv_frame_buffer  = Vec::with_capacity(frame.len());
-        yuv_frame_buffer.append(&mut y_buf);
-        yuv_frame_buffer.append(&mut u_downsampled);
-        yuv_frame_buffer.append(&mut v_downsampled);
+                u_avg.push(u_ as u8);
+                v_avg.push(v_ as u8);
+            }
+        }
 
-        yuv_frames.push(yuv_frame_buffer);
+        let mut yuv_frame= Vec::with_capacity(3/2*size);
+        yuv_frame.append(&mut y);
+        yuv_frame.append(&mut u_avg);
+        yuv_frame.append(&mut v_avg);
+        yuv_frames.push(yuv_frame);
+        y.clear(); v.clear(); u.clear();
+        u_avg.clear(); v_avg.clear();
     }
 
     yuv_frames
 }
 
+// perform run length encoding
 fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
     let mut rle_frames = Vec::with_capacity(frames.len());
     for i in 0..frames.len() {
@@ -264,24 +232,27 @@ fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
             continue;
         }
 
-        // get difference between each frame
-        let mut delta = Vec::with_capacity(frames[i].len());
-        for j in 0..delta.capacity() {
-            delta.push(frames[i][j].wrapping_sub(frames[i-1][j]));
-        }
+        let size = frames[i].len();
 
-        // compute run length encoding on frame differences
-        let mut rle = Vec::new();
-        let mut j = 0;
-        while j < delta.len() {
-            let mut count = 0;
-            while count < 255 && j+count < delta.len() && delta[j+count] == delta[j] {
-                count += 1;
+        let mut rle = Vec::with_capacity(size*2);
+        let mut prev = frames[i][0].wrapping_sub(frames[i-1][0]);
+        let mut running_count = 1;
+        for j in 1..size {
+            let diff = frames[i][j].wrapping_sub(frames[i-1][j]);
+            if running_count < 255 && diff == prev {
+                running_count += 1;
+            } else {
+                rle.push(running_count as u8);
+                rle.push(prev);
+                running_count = 1;
+                prev = diff;
             }
-            rle.push(count as u8);
-            rle.push(delta[j]);
 
-            j += count;
+            // make sure to push last element
+            if j == size - 1 {
+                rle.push(running_count as u8);
+                rle.push(diff);
+            }
         }
 
         rle_frames.push(rle);
@@ -290,15 +261,16 @@ fn rle_encode(frames: &Vec<Frame>) -> Vec<Frame> {
     rle_frames
 }
 
+// decode rle encoded frames
 fn rle_decode(frames: &Vec<Frame>, size: usize) -> Vec<Frame> {
     let mut rle_frames = Vec::with_capacity(frames.len());
+    let mut delta = Vec::with_capacity(size);
     for i in 0..frames.len() {
         if i == 0 {
             rle_frames.push(frames[0].to_vec());
             continue;
         }
 
-        let mut delta = Vec::with_capacity(size);
         for j in (0..frames[i].len()).step_by(2) {
             let count = frames[i][j];
             for _ in 0..count {
@@ -308,9 +280,10 @@ fn rle_decode(frames: &Vec<Frame>, size: usize) -> Vec<Frame> {
         assert_eq!(size, delta.len());
 
         let mut decoded_frame = Vec::with_capacity(size);
-        for (j, diff) in delta.iter().enumerate() {
-            decoded_frame.push(rle_frames[i-1][j].wrapping_add(*diff));
+        for j in 0..delta.len() {
+            decoded_frame.push(delta[j].wrapping_add(rle_frames[i-1][j]));
         }
+        delta.clear();
             
         rle_frames.push(decoded_frame);
     }
